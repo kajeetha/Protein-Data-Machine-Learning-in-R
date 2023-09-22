@@ -1,0 +1,324 @@
+---
+title: "Peptide Machine Learning Models"
+output: html_document
+---
+
+# Melting Temp
+
+
+
+```{r}
+df = read.csv("raw_data_accuracy_benchmark.fix.txt", sep="\t")
+```
+
+We pick up where we left off last time, adding the log-length feature:
+
+```{r}
+df$LLog = log(df$Length)
+```
+
+
+## Split into test and training
+
+```{r}
+set.seed(2)
+N = length(unique(df$Sequence))
+test_seq = sample(unique(df$Sequence), N/5)
+df_test = subset(df, Sequence %in% test_seq)
+df_train = subset(df, ! (Sequence %in% test_seq))
+dim(df_test)
+dim(df_train)
+```
+
+## Use lm
+
+```{r}
+df.lm = lm(Tm_exp ~ X.CG + Length + X.salt. + X.oligo. + LLog, data=df_train)
+summary(df.lm)
+sum( (predict(df.lm, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.lm, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+```
+
+```{r}
+plot(df$LLog, df$Length)
+df.lm = lm(Tm_exp ~ X.CG + Length + X.salt. + X.oligo., data=df_train)
+sum( (predict(df.lm, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+df.lm = lm(Tm_exp ~ X.CG +  X.salt. + X.oligo. + LLog, data=df_train)
+sum( (predict(df.lm, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+df.lm = lm(Tm_exp ~ X.CG + Length + X.salt. + X.oligo. + LLog, data=df_train)
+sum( (predict(df.lm, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+```
+
+It looks like for a linear model, it is worthwhile to keep even highly correlated variables. The model that contains both variables performs best.
+
+## Use Random Forests
+
+```{r}
+library(randomForest)
+df.rf=randomForest(Tm_exp ~ X.CG + Length + X.salt. + X.oligo. + LLog, data = df_train, ntree=200)
+varImpPlot(df.rf)
+plot(df.rf)
+sum( (predict(df.rf, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.rf, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Model 1")
+
+df.rf=randomForest(Tm_exp ~ X.CG + X.salt. + X.oligo. + LLog, data = df_train, ntree=200)
+sum( (predict(df.rf, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.rf, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+varImpPlot(df.rf)
+print("Model 2")
+
+df.rf=randomForest(Tm_exp ~ X.CG + Length + X.salt. + X.oligo. , data = df_train, ntree=200)
+sum( (predict(df.rf, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.rf, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+varImpPlot(df.rf)
+print("Model 3")
+```
+
+We clearly do much better with RF when co-linear variables are removed. Which one we remove does not seem to matter much, which is not unexpected given that RF is based on trees. We see that the most important variables are CG content and salt concentration, which are also the most important variables for the linear model. We also note that the variable importance plot are almost identical for the two models with the length or the log-length, indicating that the two models are using these variables interchangeably.
+
+## Use SVM
+
+```{r}
+library(e1071)
+df.svm = svm(Tm_exp ~ X.CG + Length + X.salt. + X.oligo. + LLog, data=df_train, kernel="radial")
+sum( (predict(df.svm, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.svm, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Model 1")
+
+df.svm=svm(Tm_exp ~ X.CG + X.salt. + X.oligo. + LLog, data = df_train, kernel="radial")
+sum( (predict(df.svm, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.svm, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Model 2")
+
+df.svm=svm(Tm_exp ~ X.CG + Length + X.salt. + X.oligo. , data = df_train, kernel="radial")
+sum( (predict(df.svm, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.svm, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Model 3")
+```
+
+Using SVM, we see that we can achieve substantially higher accuracy than either linear models or random forests (MSE of 5.1 using the models with uncorrelated variables). We see lower error on the training data than on the test data, as expected. We also notice that including highly correlated variables into the model makes the preduction worse.
+
+```{r}
+library(e1071)
+df.svm=svm(Tm_exp ~ X.CG + Length + X.salt. + X.oligo. , data = df_train, kernel="radial")
+sum( (predict(df.svm, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.svm, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Radial kernel")
+
+df.svm=svm(Tm_exp ~ X.CG + Length + X.salt. + X.oligo. , data = df_train, kernel="linear")
+sum( (predict(df.svm, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.svm, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Linear kernel")
+```
+We note that only the radial kernel performs well, while the linear kernel performs similarly (or worse) than linear regression.
+
+## Use NN
+
+```{r}
+library(nnet)
+set.seed(2019)
+df.nn=nnet(Tm_exp ~ X.CG + Length + X.salt. + X.oligo. + LLog, df_train, size=5, linout=T, trace=F)
+sum( (predict(df.nn, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.nn, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Model 1")
+df.nn=nnet(Tm_exp ~ X.CG + Length + X.salt. + X.oligo., df_train, size=5, linout=T, trace=F)
+sum( (predict(df.nn, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.nn, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Model 2")
+df.nn=nnet(Tm_exp ~ X.CG +  X.salt. + X.oligo. + LLog, df_train, size=5, linout=T, trace=F)
+sum( (predict(df.nn, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.nn, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Model 3")
+```
+
+It seems like we get reasonable accuracy, however the test and training accuracy are very close. Also we tend to get very unstable results where the training fails quite often in a random manner. We therefore suspect that we need to change our parameter choice. We also may have under-fitted our model and we should increase its size (neurons in the hidden layer). 
+
+```{r}
+library(nnet)
+#set.seed(2019)
+df.nn=nnet(Tm_exp ~ X.CG + Length + X.salt. + X.oligo. + LLog, df_train, 
+           size=50, decay=0.5, maxit=5000, linout=TRUE, trace=F )
+sum( (predict(df.nn, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.nn, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Model 1")
+df.nn=nnet(Tm_exp ~ X.CG + Length + X.salt. + X.oligo., df_train, 
+           size=50, decay=0.5, maxit=5000, linout=TRUE, trace=F)
+sum( (predict(df.nn, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.nn, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Model 2")
+df.nn=nnet(Tm_exp ~ X.CG + X.salt. + X.oligo. + LLog, df_train, 
+           size=50, decay=0.5, maxit=5000, linout=TRUE, trace=F)
+sum( (predict(df.nn, df_train) - df_train$Tm_exp)^2) / nrow(df_train)
+sum( (predict(df.nn, df_test) - df_test$Tm_exp)^2) / nrow(df_test)
+print("Model 3")
+```
+
+Clearly we are not under-fitting any more since now our training MSE is lower than our test MSE. This is generally a good sign but we need to watch out for over-fitting. We also note that we achieve better performance than most other methods on the test data, so we are probably not over-fitting
+
+For this problem, we can say that ANN performs better than RF or SVM on the test data so therefore we would recommend ANN. However, it is also harder to train and less robust, so it depending on the application it may be better to have robust but slightly worse predictor.  
+
+# Protein data (peptide RT)
+
+High-performance liquid chromatography (HPLC) is a technique in analytical chemistry used to separate complex mixture of analytes including oligonucleotides, peptides and drug compounds. Each compound is characterized by a compound-specific elution time (retention time), which we will attempt to predict in this exercise. Specifically, we will predict the retention times of peptides cleaved by trypsin. The data is from the following paper https://www.nature.com/articles/srep43959 (Lu et al.) and  we have downloaded the associated data from ProteomeXChange PXD005572. We have already downloaded the data and made them available in CSV format.
+
+
+```{r}
+set.seed(2019)
+df_test = read.csv("peptides.test.csv", header=T, stringsAsFactors=F)
+df_train = read.csv("peptides.train.csv", header=T, stringsAsFactors=F)
+val_rows = sample(1:nrow(df_train), nrow(df_train)/5)
+df_val = df_train[val_rows, ]
+df_train = df_train[-val_rows, ]
+```
+
+## Prediction with length
+
+The first approach we want to take is to engineer features, we would like to look at whether the length of the peptide can predict the retention time on the column.
+
+```{r}
+library(stringr)
+
+df_train$length = sapply(df_train$peptides, nchar)
+df_val$length = sapply(df_val$peptides, nchar)
+df_test$length = sapply(df_test$peptides, nchar)
+plot(df_train$rt, df_train$length, cex=0.2)
+lm.peptides = lm(rt ~ length, df_train)
+summary(lm.peptides)
+print("Anova")
+anova(lm.peptides)
+
+mse = ( mean(df_train$rt) - df_val$rt)^2 / nrow(df_val)
+print(sum(mse))
+mse = (predict(lm.peptides, df_val) - df_val$rt)^2 / nrow(df_val)
+print(sum(mse))
+# plot(df_val$rt, predict(lm.peptides, df_val))
+```
+
+We clearly achieve a reduction of the MSE on the test data from 37 to 32.7 when using the length. Our model using the length has strong p-value (1e-16) and we conclude that the length is a statistically significant predictor for RT. However our prediction is not really good with a $R^2$ of only 0.14 (14% of the variance explained).
+
+## Engineer features based on AA composition
+
+Now lets engineer further features based on the amino acid composition:
+
+
+```{r}
+for (aa in c("A", "C", "D", "E", "F", "G", "H", "I", "K", "L",
+             "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"))
+{
+  df_train[[aa]] = sapply(df_train$peptides, str_count, aa) / df_train$length
+  df_test[[aa]] = sapply(df_test$peptides, str_count, aa) / df_test$length
+  df_val[[aa]] = sapply(df_val$peptides, str_count, aa) / df_val$length
+}
+
+write.csv(df_train, "peptides.f.train.csv", row.names=F)
+write.csv(df_test, "peptides.f.test.csv", row.names=F)
+write.csv(df_val, "peptides.f.val.csv", row.names=F)
+```
+
+
+## Using a linear model
+
+```{r}
+df_test = read.csv("peptides.f.test.csv", header=T, stringsAsFactors=F)
+df_train = read.csv("peptides.f.train.csv", header=T, stringsAsFactors=F)
+df_val = read.csv("peptides.f.val.csv", header=T, stringsAsFactors=F)
+#f = reformulate(setdiff(colnames(df_train), c("rt", "peptides")), response="rt")
+f = reformulate(setdiff(colnames(df_train), c("rt", "peptides", "Y")), response="rt")
+lm.peptides = lm(f, df_train)
+summary(lm.peptides)
+mse = (predict(lm.peptides, df_val) - df_val$rt)^2 / nrow(df_val)
+print(sum(mse))
+plot(df_val$rt, predict(lm.peptides, df_val), cex=0.2)
+```
+
+We see that we can now reduce the MSE to about 10.3 using our new predictor variables. We also see that our scatter plot comparing true and predicted RT is now looking much better than before with length alone. We see that hydrophobic amino acids like Phenylalanine contribute with positive coefficients while charged amino acids (K, R, H) contribute with strong negative coefficients.
+
+## Using Random Forest
+Lets first try Random Forest:
+
+```{r}
+library(randomForest)
+rf.peptides = randomForest(f, df_train)
+mse = (predict(rf.peptides, df_val) - df_val$rt)^2 / nrow(df_val)
+varImpPlot(rf.peptides)
+print(sum(mse))
+# print(sum((predict(rf.peptides, df_test) - df_test$rt)^2 / nrow(df_test)))
+plot(df_test$rt, predict(rf.peptides, df_test), cex=0.2)
+```
+
+We notice that we actually have a larger error (MSE of 15.1) with random forests than with our linear model. 
+
+## Using SVM
+
+```{r}
+library(e1071)
+svm.peptides = svm(f, df_train, kernel="radial")
+mse = (predict(svm.peptides, df_val) - df_val$rt)^2 / nrow(df_val)
+print(sum(mse))
+plot(df_val$rt, predict(svm.peptides, df_val), cex=0.2)
+svm.peptides = svm(f, df_train, kernel="polynomial")
+mse = (predict(svm.peptides, df_val) - df_val$rt)^2 / nrow(df_val)
+print(sum(mse))
+plot(df_val$rt, predict(svm.peptides, df_val), cex=0.2)
+svm.peptides = svm(f, df_train, kernel="linear")
+mse = (predict(svm.peptides, df_val) - df_val$rt)^2 / nrow(df_val)
+print(sum(mse))
+plot(df_val$rt, predict(svm.peptides, df_val), cex=0.2)
+```
+
+On the other hand, SVM seems to do much better on the data than RF, specifically a radial kernel can decrease our MSE down to 10.4 which is similar to what our linear model got. SVM with a linear kernel performs similarly or worse than a linear regression model with an MSE of 10.7.
+
+
+
+## Using ANN
+
+```{r}
+library(nnet)
+set.seed(2018)
+for (k in 1:25)
+{
+  print(paste("k=", k))
+  nn.peptides=nnet(f, df_train, size=k, linout=TRUE, maxit=5000, trace=F)
+  print(sum((predict(nn.peptides, df_train) - df_train$rt)^2 ) / nrow(df_train))
+  print(sum((predict(nn.peptides, df_val) - df_val$rt)^2 ) / nrow(df_val))
+}
+plot(df_val$rt, predict(nn.peptides, df_val), cex=0.2)
+```
+
+We see that we get highly erratic behavior of the network, in most cases not fitting well at all. Only in a few cases do we even get a reasonable fit where test and training error are anywhere close to what we want. This is likely due to missing regularization and missing normalization of our input data. We notice that we have not yet set our hyperparameter decay. However, we also notice that the ANN sometimes fits very well and performs better on the validation dataset than previous models.
+
+```{r}
+library(nnet)
+set.seed(2018)
+for (k in 1:25)
+{
+  print(paste("k=", k))
+  nn.peptides=nnet(f, df_train, size=k, decay=0.75, linout=TRUE, maxit=500, trace=F)
+  print(sum((predict(nn.peptides, df_train) - df_train$rt)^2 ) / nrow(df_train))
+  print(sum((predict(nn.peptides, df_val) - df_val$rt)^2 ) / nrow(df_val))
+}
+plot(df_val$rt, predict(nn.peptides, df_val), cex=0.2)
+```
+
+We find that an artificial neural network performs well on the data (with the MSE decreasing to about 8) and that increasing the number of neurons in the hidden layer actually decreases the error on the validation data up to about 3 neurons after which we see an interesting phenomena of overfitting: the error on the validation data *increases* while the error on the training data *decreases*. This means we get an increasinly good fit on the training data while the generalization error (estimated using the validation data) increases: the model becomes less and less useful.
+
+## Final model
+
+Here we train a final model after optimizing all of our hyperparameters on the validation dataset. We find that a ANN of size 3 and a decay of 0.1 should perform best. We expect a performance of an MSE of around 8.524845647 since that is what we got on the validation data. 
+
+```{r}
+library(nnet)
+#set.seed(2018)
+k = 3
+df_train_full = rbind(df_train, df_val)
+nn.peptides=nnet(f, df_train_full, size=k, decay=0.75, linout=TRUE, maxit=500, trace=F)
+print(sum((predict(nn.peptides, df_train_full) - df_train_full$rt)^2 ) / nrow(df_train_full))
+print(sum((predict(nn.peptides, df_test) - df_test$rt)^2 ) / nrow(df_test))
+plot(df_test$rt, predict(nn.peptides, df_test), cex=0.2)
+```
+
+We observe that the performance is similar to the expected performance, which is around 7.5-8.5 MSE on the test dataste (depending on the chosen seed).
+
+Our choice of using only the training data and validation data to optimize hyperparameters and choose models allowed us to explore a large number of different models while still allowing us to estimate our generalization error on the final hold-out dataset (the test dataset). Since we have not used the test dataset during model selection, it is "untainted" and we can use it to evaluate final model performance and estimate how well our model would perform on new data that it has never seen before.
+
